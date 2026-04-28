@@ -27,6 +27,7 @@ import navic.composeapp.generated.resources.title_artists
 import navic.composeapp.generated.resources.title_genres
 import navic.composeapp.generated.resources.title_library
 import navic.composeapp.generated.resources.title_playlists
+import navic.composeapp.generated.resources.title_podcasts
 import navic.composeapp.generated.resources.title_radios
 import navic.composeapp.generated.resources.title_search
 import navic.composeapp.generated.resources.title_songs
@@ -111,6 +112,12 @@ private enum class NavItem(
 		icon = Icons.Filled.Radio,
 		iconUnselected = Icons.Outlined.Radio,
 		label = Res.string.title_radios
+	),
+	PODCASTS(
+		destination = Screen.PodcastChannelList(),
+		icon = Icons.Outlined.Podcast,
+		iconUnselected = Icons.Outlined.Podcast,
+		label = Res.string.title_podcasts
 	)
 }
 
@@ -151,6 +158,7 @@ fun BottomBar(
 						NavbarTab.Id.GENRES -> NavItem.GENRES
 						NavbarTab.Id.SONGS -> NavItem.SONGS
 						NavbarTab.Id.RADIOS -> NavItem.RADIOS
+						NavbarTab.Id.PODCASTS -> NavItem.PODCASTS
 					}
 					val selected = backStack.lastOrNull() == item.destination
 
@@ -206,6 +214,7 @@ fun BottomBar(
 						NavbarTab.Id.GENRES -> NavItem.GENRES
 						NavbarTab.Id.SONGS -> NavItem.SONGS
 						NavbarTab.Id.RADIOS -> NavItem.RADIOS
+						NavbarTab.Id.PODCASTS -> NavItem.PODCASTS
 					}
 					val selected = backStack.last() == item.destination
 

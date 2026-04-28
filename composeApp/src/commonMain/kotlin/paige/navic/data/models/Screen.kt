@@ -53,6 +53,11 @@ sealed interface Screen : NavKey {
 	data class RadioList(
 		val nested: Boolean = false
 	) : Screen
+	@Immutable
+	@Serializable
+	data class PodcastChannelList(
+		val nested: Boolean = false
+	) : Screen
 
 	// misc
 	@Immutable
@@ -89,6 +94,9 @@ sealed interface Screen : NavKey {
 	@Immutable
 	@Serializable
 	data class ArtistDetail(val artist: String) : Screen
+	@Immutable
+	@Serializable
+	data class PodcastChannelDetail(val channelId: String) : Screen
 
 	// settings
 	@Immutable

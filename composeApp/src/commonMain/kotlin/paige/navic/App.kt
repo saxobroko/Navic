@@ -73,6 +73,8 @@ import paige.navic.ui.screens.login.LoginScreen
 import paige.navic.ui.screens.lyrics.LyricsScreen
 import paige.navic.ui.screens.nowPlaying.NowPlayingScreen
 import paige.navic.ui.screens.playlist.PlaylistListScreen
+import paige.navic.ui.screens.podcast.PodcastChannelDetailScreen
+import paige.navic.ui.screens.podcast.PodcastChannelListScreen
 import paige.navic.ui.screens.queue.QueueScreen
 import paige.navic.ui.screens.radio.RadioListScreen
 import paige.navic.ui.screens.search.SearchScreen
@@ -241,9 +243,11 @@ private fun entryProvider(
 		entry<Screen.SongList>(metadata = navtabMetadata) { key ->
 			SongListScreen(key.nested, key.artistId, key.artistName)
 		}
-
 		entry<Screen.RadioList>(metadata = navtabMetadata) { key ->
 			RadioListScreen(key.nested)
+		}
+		entry<Screen.PodcastChannelList>(metadata = navtabMetadata) { key ->
+			PodcastChannelListScreen(key.nested)
 		}
 
 		// misc
@@ -281,6 +285,9 @@ private fun entryProvider(
 		}
 		entry<Screen.ArtistDetail> { key ->
 			ArtistDetailScreen(key.artist)
+		}
+		entry<Screen.PodcastChannelDetail> { key ->
+			PodcastChannelDetailScreen(key.channelId)
 		}
 
 		// settings
