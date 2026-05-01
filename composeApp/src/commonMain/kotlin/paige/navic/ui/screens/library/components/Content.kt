@@ -12,7 +12,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
-import androidx.paging.compose.LazyPagingItems
 import kotlinx.collections.immutable.ImmutableList
 import navic.composeapp.generated.resources.Res
 import navic.composeapp.generated.resources.option_sort_frequent
@@ -23,7 +22,6 @@ import navic.composeapp.generated.resources.option_sort_starred
 import navic.composeapp.generated.resources.title_artists
 import navic.composeapp.generated.resources.title_genres
 import navic.composeapp.generated.resources.title_playlists
-import paige.navic.data.database.entities.DownloadStatus
 import paige.navic.data.models.Screen
 import paige.navic.domain.models.DomainAlbum
 import paige.navic.domain.models.DomainAlbumListType
@@ -36,7 +34,6 @@ import paige.navic.icons.outlined.LibraryAdd
 import paige.navic.icons.outlined.Shuffle
 import paige.navic.icons.outlined.Star
 import paige.navic.ui.components.layouts.horizontalSection
-import paige.navic.ui.components.layouts.pagedHorizontalSection
 import paige.navic.ui.screens.album.components.AlbumListScreenItem
 import paige.navic.ui.screens.artist.ArtistsScreenItem
 import paige.navic.ui.screens.genre.components.GenreListScreenCard
@@ -50,10 +47,9 @@ fun LibraryScreenContent(
 	scrollBehavior: TopAppBarScrollBehavior,
 	innerPadding: PaddingValues,
 	onSetShareId: (String) -> Unit,
-	isOnline: Boolean,
 
 	// albums
-	pagedAlbums: LazyPagingItems<DomainAlbum>,
+	albumsState: UiState<ImmutableList<DomainAlbum>>,
 	selectedAlbum: DomainAlbum?,
 	selectedAlbumIsStarred: Boolean,
 	selectedAlbumRating: Int,
@@ -116,10 +112,11 @@ fun LibraryScreenContent(
 			start = false
 		)
 
-		pagedHorizontalSection(
+		horizontalSection(
 			title = Res.string.option_sort_recent,
 			destination = Screen.AlbumList(true, DomainAlbumListType.Recent),
-			items = pagedAlbums,
+			state = albumsState,
+			key = { it.id },
 			seeAll = true
 		) { album ->
 			AlbumListScreenItem(
@@ -134,7 +131,6 @@ fun LibraryScreenContent(
 				onSetShareId = { onSetShareId(it) },
 				onPlayNext = onPlayAlbumNext,
 				onAddToQueue = onAddAlbumToQueue,
-				isOnline = isOnline,
 				rating = selectedAlbumRating,
 				onSetRating = onRateSelectedAlbum
 			)
