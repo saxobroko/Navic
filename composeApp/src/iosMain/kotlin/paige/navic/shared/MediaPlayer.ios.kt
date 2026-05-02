@@ -22,6 +22,7 @@ import platform.AVFAudio.setActive
 import platform.AVFoundation.AVPlayer
 import platform.AVFoundation.AVPlayerItem
 import platform.AVFoundation.AVPlayerItemDidPlayToEndTimeNotification
+import platform.AVFoundation.AVURLAsset
 import platform.AVFoundation.addPeriodicTimeObserverForInterval
 import platform.AVFoundation.currentItem
 import platform.AVFoundation.currentTime
@@ -31,15 +32,19 @@ import platform.AVFoundation.play
 import platform.AVFoundation.removeTimeObserver
 import platform.AVFoundation.replaceCurrentItemWithPlayerItem
 import platform.AVFoundation.seekToTime
+import platform.AVFoundation.setRate
 import platform.CoreGraphics.CGSizeMake
 import platform.CoreMedia.CMTimeGetSeconds
 import platform.CoreMedia.CMTimeMake
 import platform.CoreMedia.CMTimeMakeWithSeconds
 import platform.Foundation.NSData
+import platform.Foundation.NSMutableURLRequest
 import platform.Foundation.NSNotificationCenter
 import platform.Foundation.NSOperationQueue
 import platform.Foundation.NSURL
-import platform.Foundation.dataWithContentsOfURL
+import platform.Foundation.NSURLSession
+import platform.Foundation.addValue
+import platform.Foundation.dataTaskWithRequest
 import platform.MediaPlayer.MPChangePlaybackPositionCommandEvent
 import platform.MediaPlayer.MPMediaItemArtwork
 import platform.MediaPlayer.MPMediaItemPropertyAlbumTitle
@@ -54,6 +59,10 @@ import platform.MediaPlayer.MPRemoteCommandCenter
 import platform.MediaPlayer.MPRemoteCommandHandlerStatusCommandFailed
 import platform.MediaPlayer.MPRemoteCommandHandlerStatusSuccess
 import platform.UIKit.UIImage
+import platform.darwin.DISPATCH_TIME_FOREVER
+import platform.darwin.dispatch_semaphore_create
+import platform.darwin.dispatch_semaphore_signal
+import platform.darwin.dispatch_semaphore_wait
 
 class IOSMediaPlayerViewModel(
 	stateRepository: PlayerStateRepository,
@@ -68,7 +77,8 @@ class IOSMediaPlayerViewModel(
 	private val player = AVPlayer()
 	private var timeObserver: Any? = null
 	private var playbackEndObserver: Any? = null
-	private val scrobbleManager = IOSScrobbleManager(player, viewModelScope, connectivityManager, syncManager)
+	private val scrobbleManager =
+		IOSScrobbleManager(player, viewModelScope, connectivityManager, syncManager)
 	private var pendingSyncState: PlayerUiState? = null
 	private var isTransitioningBetweenTracks = false
 
@@ -88,8 +98,8 @@ class IOSMediaPlayerViewModel(
 				val currentTime = player.currentTime()
 				val durationSeconds = CMTimeGetSeconds(duration)
 				val currentSeconds = CMTimeGetSeconds(currentTime)
-				
-				if (!durationSeconds.isNaN() && !currentSeconds.isNaN() && 
+
+				if (!durationSeconds.isNaN() && !currentSeconds.isNaN() &&
 					(durationSeconds - currentSeconds) < 1.0) {
 					when (_uiState.value.repeatMode) {
 						1 -> {
@@ -152,10 +162,8 @@ class IOSMediaPlayerViewModel(
 	}
 
 	override fun playAt(index: Int) {
-		if (isTransitioningBetweenTracks) {
-			return
-		}
-		
+		if (isTransitioningBetweenTracks) return
+
 		val songToPlay = _uiState.value.queue.getOrNull(index) ?: return
 
 		if (!songToPlay.id.startsWith("radio_") && !isAvailable(songToPlay.id)) {
@@ -169,7 +177,7 @@ class IOSMediaPlayerViewModel(
 		try {
 			player.pause()
 			player.replaceCurrentItemWithPlayerItem(null)
-			player.replaceCurrentItemWithPlayerItem(AVPlayerItem(url))
+			player.replaceCurrentItemWithPlayerItem(createAVPlayerItem(url))
 			player.play()
 
 			_uiState.update {
@@ -191,8 +199,8 @@ class IOSMediaPlayerViewModel(
 
 	override fun playNextSingle(song: DomainSong) {
 		_uiState.update { state ->
-			val newQueue = 
-				if (state.queue == null || state.queue.isEmpty()) 
+			val newQueue =
+				if (state.queue.isEmpty())
 					state.queue + song
 				else
 					state.queue.slice(0..state.currentIndex) + song + state.queue.slice(state.currentIndex+1..state.queue.size-1)
@@ -206,8 +214,8 @@ class IOSMediaPlayerViewModel(
 
 	override fun playNext(collection: DomainSongCollection) {
 		_uiState.update { state ->
-			val newQueue = 
-				if (state.queue == null || state.queue.isEmpty()) 
+			val newQueue =
+				if (state.queue.isEmpty())
 					state.queue + collection.songs
 				else
 					state.queue.slice(0..state.currentIndex) + collection.songs + state.queue.slice(state.currentIndex+1..state.queue.size-1)
@@ -263,7 +271,7 @@ class IOSMediaPlayerViewModel(
 		if (url != null) {
 			player.pause()
 			player.replaceCurrentItemWithPlayerItem(null)
-			player.replaceCurrentItemWithPlayerItem(AVPlayerItem(url))
+			player.replaceCurrentItemWithPlayerItem(createAVPlayerItem(url))
 			player.play()
 		}
 
@@ -406,6 +414,11 @@ class IOSMediaPlayerViewModel(
 		playAt(0)
 	}
 
+	override fun setPlaybackSpeed(value: Float) {
+		player.setRate(value)
+		_uiState.update { it.copy(playbackSpeed = value) }
+	}
+
 	override fun seek(normalized: Float) {
 		val duration = player.currentItem?.duration ?: return
 		val totalSeconds = CMTimeGetSeconds(duration)
@@ -458,12 +471,34 @@ class IOSMediaPlayerViewModel(
 
 		info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(
 			boundsSize = CGSizeMake(512.0, 512.0),
-			requestHandler = {
-				return@MPMediaItemArtwork song.coverArtId
-					?.let { SessionManager.api.getCoverArtUrl(it, auth = true) }
-					?.let { NSURL.URLWithString(it) }
-					?.let { NSData.dataWithContentsOfURL(it) }
-					?.let { UIImage(data = it) } ?: UIImage()
+			requestHandler = { _ ->
+				runCatching {
+					val url = song.coverArtId
+						?.let { SessionManager.api.getCoverArtUrl(it, auth = true) }
+						?.let { NSURL.URLWithString(it) } ?: return@runCatching null
+
+					val request = NSMutableURLRequest.requestWithURL(url).apply {
+						val customHeaders = Settings.shared.customHeadersMap()
+						if (customHeaders.isNotEmpty()) {
+							customHeaders.forEach { (key, value) ->
+								addValue(key, forHTTPHeaderField = value)
+							}
+						}
+					}
+
+					var fetchedData: NSData? = null
+					val semaphore = dispatch_semaphore_create(0)
+
+					val task = NSURLSession.sharedSession.dataTaskWithRequest(request) { data, _, _ ->
+						fetchedData = data
+						dispatch_semaphore_signal(semaphore)
+					}
+					task.resume()
+
+					dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER)
+
+					fetchedData?.let { UIImage(data = it) }
+				}.getOrNull() ?: UIImage()
 			}
 		)
 
@@ -484,10 +519,11 @@ class IOSMediaPlayerViewModel(
 		val song = state.queue.getOrNull(index) ?: return
 
 		val url = getSongUrl(song) ?: return
-		
+
 		player.pause()
 		player.replaceCurrentItemWithPlayerItem(null)
-		player.replaceCurrentItemWithPlayerItem(AVPlayerItem(url))
+		player.replaceCurrentItemWithPlayerItem(createAVPlayerItem(url))
+		player.setRate(state.playbackSpeed)
 
 		if (!song.id.startsWith("radio_")) {
 			val durationMs = song.duration.inWholeMilliseconds
@@ -498,6 +534,16 @@ class IOSMediaPlayerViewModel(
 		}
 
 		updateNowPlayingInfo(song)
+	}
+
+	private fun createAVPlayerItem(url: NSURL): AVPlayerItem {
+		val headers = Settings.shared.customHeadersMap()
+		if (headers.isEmpty() || url.isFileURL()) {
+			return AVPlayerItem(url)
+		}
+		val options: Map<Any?, Any?> = mapOf("AVURLAssetHTTPHeaderFieldsKey" to headers)
+
+		return AVPlayerItem(AVURLAsset(uRL = url, options = options))
 	}
 
 	private fun getStreamUrl(id: String) =
@@ -520,6 +566,7 @@ class IOSMediaPlayerViewModel(
 			song.id.startsWith("radio_") && !song.filePath.isNullOrEmpty() -> {
 				NSURL.URLWithString(song.filePath)
 			}
+
 			else -> {
 				val localPath = downloadManager.getDownloadedFilePath(song.id)
 				if (localPath != null) {
